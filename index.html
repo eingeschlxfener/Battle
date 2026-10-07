@@ -1,0 +1,2117 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>SkyRush — PeerJS Survival Royale</title>
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <style>
+    :root{
+      --bg:#07111f;--panel:rgba(10,18,32,.88);--line:rgba(255,255,255,.1);
+      --text:#eef6ff;--muted:#9ab0c6;--accent:#7cf6d0;--accent2:#7fb3ff;
+      --danger:#ff6b9a;--gold:#ffd66b;
+    }
+    *{box-sizing:border-box}
+    html,body{
+      margin:0;height:100%;overflow:hidden;background:var(--bg);
+      font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:var(--text)
+    }
+    button,input{font:inherit}
+    canvas{
+      display:block;width:100vw;height:100vh;background:#0b1626;cursor:crosshair
+    }
+    #ui{position:fixed;inset:0;pointer-events:none}
+    .screen{
+      position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+      padding:20px
+    }
+    .screen.active{display:flex}
+    .panel{
+      pointer-events:auto;width:min(760px,94vw);padding:28px;
+      border:1px solid var(--line);border-radius:22px;
+      background:linear-gradient(180deg,rgba(20,34,54,.96),rgba(8,16,30,.96));
+      backdrop-filter:blur(14px);
+      box-shadow:0 24px 90px rgba(0,0,0,.45)
+    }
+    h1{
+      margin:0 0 8px;font-size:clamp(40px,7vw,78px);
+      line-height:.95;letter-spacing:-.05em
+    }
+    h2{margin:0 0 10px;font-size:30px}
+    .sub{color:var(--muted);margin:0 0 22px;line-height:1.5}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    input{
+      flex:1;min-width:200px;border:1px solid var(--line);
+      background:#0b192b;color:var(--text);border-radius:12px;
+      padding:13px 14px;outline:none
+    }
+    input:focus{border-color:rgba(124,246,208,.65)}
+    button{
+      border:0;border-radius:12px;padding:13px 16px;cursor:pointer;
+      color:#07111f;background:var(--accent);font-weight:800
+    }
+    button.secondary{
+      background:#14243a;color:var(--text);border:1px solid var(--line)
+    }
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .tiny{font-size:13px;color:var(--muted)}
+    .bad{color:#ff9abb}.good{color:var(--accent)}
+    .room{font-weight:900;letter-spacing:.16em;font-size:30px;margin:8px 0 18px}
+    #lobbyList{
+      margin:14px 0 18px;padding:12px;border-radius:14px;
+      background:rgba(255,255,255,.035);min-height:90px
+    }
+    .playerLine{
+      display:flex;justify-content:space-between;gap:8px;
+      padding:7px 4px;border-bottom:1px solid rgba(255,255,255,.05)
+    }
+    .playerLine:last-child{border-bottom:0}
+    #hud{
+      position:absolute;left:18px;right:18px;top:16px;display:none;pointer-events:none
+    }
+    .hudrow{
+      display:flex;justify-content:space-between;align-items:flex-start;gap:12px
+    }
+    .chip{
+      background:rgba(6,14,25,.72);border:1px solid var(--line);
+      backdrop-filter:blur(8px);border-radius:12px;padding:10px 12px
+    }
+    #stats{display:flex;gap:8px;flex-wrap:wrap}
+    #status{max-width:470px;text-align:right}
+    #message{
+      position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+      font-weight:900;font-size:clamp(28px,5vw,54px);
+      text-shadow:0 8px 34px rgba(0,0,0,.55);
+      opacity:0;transition:opacity .25s;white-space:nowrap
+    }
+    #message.show{opacity:1}
+    #help{
+      position:absolute;left:18px;bottom:16px;display:none
+    }
+    #mini{
+      position:absolute;right:18px;bottom:16px;display:none
+    }
+    #toast{
+      position:absolute;left:50%;top:84px;transform:translateX(-50%);
+      padding:10px 14px;border-radius:12px;background:rgba(6,14,25,.9);
+      border:1px solid var(--line);opacity:0;transition:opacity .2s;
+      pointer-events:none
+    }
+    #toast.show{opacity:1}
+    .bar{
+      height:8px;background:#203249;border-radius:99px;
+      overflow:hidden;margin-top:7px
+    }
+    #zoneBar{
+      height:100%;width:100%;
+      background:linear-gradient(90deg,var(--accent),var(--accent2))
+    }
+    .footer{
+      margin-top:16px;display:flex;justify-content:space-between;
+      gap:10px;flex-wrap:wrap
+    }
+    .kbd{
+      padding:2px 7px;border-radius:6px;background:#15263d;
+      border:1px solid var(--line);font-size:12px
+    }
+    @media(max-width:700px){
+      #help{font-size:12px}.panel{padding:20px}
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="ui">
+
+  <div id="menu" class="screen active">
+    <div class="panel">
+      <div class="tiny">PEER-TO-PEER • SINGLE FILE</div>
+      <h1>SKYRUSH</h1>
+
+      <p class="sub">
+        Ein schnelles Multiplayer-Survival-Spiel. Sammle Kristalle, bewege dich
+        durch die Arena und bleibe innerhalb der sicheren Zone.
+        Kein Backend – nur diese Datei und PeerJS.
+      </p>
+
+      <div class="row">
+        <button id="createBtn">Raum erstellen</button>
+        <input id="roomInput" maxlength="6" placeholder="ROOM-CODE">
+        <button class="secondary" id="joinBtn">Beitreten</button>
+      </div>
+
+      <p id="menuStatus" class="tiny" style="margin-top:14px">
+        Bereit.
+      </p>
+
+      <div class="footer tiny">
+        <span>
+          <span class="kbd">WASD</span> bewegen ·
+          <span class="kbd">SHIFT</span> sprinten ·
+          <span class="kbd">SPACE</span> dashen
+        </span>
+        <span>PeerJS 1.5.5</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="lobby" class="screen">
+    <div class="panel">
+      <div class="tiny">LOBBY</div>
+      <h2>Dein Raum</h2>
+
+      <div class="room" id="roomCodeView">------</div>
+
+      <p class="sub">
+        Teile den Raum-Code mit anderen Spielern. Der Host startet das Match.
+      </p>
+
+      <div id="lobbyList"></div>
+
+      <div class="row">
+        <button id="startBtn">Match starten</button>
+        <button class="secondary" id="leaveBtn">Verlassen</button>
+      </div>
+
+      <p id="lobbyStatus" class="tiny" style="margin-top:12px"></p>
+    </div>
+  </div>
+
+  <div id="end" class="screen">
+    <div class="panel" style="text-align:center">
+      <div class="tiny">MATCH BEENDET</div>
+      <h2 id="endTitle">SkyRush!</h2>
+      <p class="sub" id="endText"></p>
+      <button id="againBtn">Zur Lobby</button>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div class="hudrow">
+
+      <div id="stats">
+        <div class="chip">💎 <b id="crystals">0</b></div>
+        <div class="chip">🏁 <b id="rank">—</b></div>
+        <div class="chip">👥 <b id="players">0</b></div>
+        <div class="chip">⚡ <b id="dash">ready</b></div>
+      </div>
+
+      <div class="chip" id="status">
+        <div><b id="zoneText">Zone stabil</b></div>
+        <div class="bar">
+          <div id="zoneBar"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="help" class="chip">
+    <b>WASD</b> ·
+    <b>SHIFT</b> Sprint ·
+    <b>SPACE</b> Dash ·
+    <b>ESC</b> Maus frei
+  </div>
+
+  <div id="mini" class="chip tiny">
+    Kristalle: <b id="miniCrystals">0</b>
+  </div>
+
+  <div id="message"></div>
+  <div id="toast"></div>
+
+</div>
+
+<script>
+"use strict";
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const menu = document.getElementById("menu");
+const lobby = document.getElementById("lobby");
+const end = document.getElementById("end");
+const hud = document.getElementById("hud");
+const help = document.getElementById("help");
+const mini = document.getElementById("mini");
+
+const roomInput = document.getElementById("roomInput");
+const menuStatus = document.getElementById("menuStatus");
+const lobbyStatus = document.getElementById("lobbyStatus");
+const roomCodeView = document.getElementById("roomCodeView");
+const lobbyList = document.getElementById("lobbyList");
+const message = document.getElementById("message");
+const toast = document.getElementById("toast");
+
+const W = 2600;
+const H = 1800;
+
+const MAX_PLAYERS = 12;
+const TICK = 50;
+const SNAP = 80;
+const CRYSTAL_TARGET = 12;
+const MATCH_TIME = 150000;
+
+let DPR = Math.min(2, window.devicePixelRatio || 1);
+
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = innerWidth * DPR;
+  canvas.height = innerHeight * DPR;
+}
+
+addEventListener("resize", resize);
+resize();
+
+const keys = new Set();
+
+const mouse = {
+  x: innerWidth / 2,
+  y: innerHeight / 2,
+  down: false
+};
+
+addEventListener("keydown", e => {
+  keys.add(e.code);
+
+  if([
+    "Space",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight"
+  ].includes(e.code)){
+    e.preventDefault();
+  }
+
+  if(e.code === "Space"){
+    tryDash();
+  }
+
+  if(e.code === "Escape"){
+    document.exitPointerLock?.();
+  }
+});
+
+addEventListener("keyup", e => {
+  keys.delete(e.code);
+});
+
+canvas.addEventListener("mousemove", e => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+});
+
+canvas.addEventListener("mousedown", e => {
+  if(e.button === 0){
+    mouse.down = true;
+    canvas.requestPointerLock?.();
+  }
+});
+
+addEventListener("mouseup", e => {
+  if(e.button === 0){
+    mouse.down = false;
+  }
+});
+
+addEventListener("blur", () => {
+  mouse.down = false;
+});
+
+const obstacles = [
+  {x:300,y:240,w:300,h:170},
+  {x:780,y:180,w:460,h:150},
+  {x:1500,y:220,w:330,h:210},
+  {x:2000,y:360,w:300,h:260},
+  {x:420,y:760,w:360,h:210},
+  {x:1020,y:680,w:440,h:250},
+  {x:1710,y:720,w:430,h:180},
+  {x:280,y:1250,w:400,h:230},
+  {x:900,y:1180,w:300,h:270},
+  {x:1450,y:1180,w:470,h:230},
+  {x:2100,y:1210,w:300,h:310}
+];
+
+let stars = [];
+
+for(let i = 0; i < 220; i++){
+  stars.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    r: Math.random() * 1.8 + .4,
+    a: Math.random() * .7 + .2
+  });
+}
+
+function keyColor(i){
+  return [
+    "#7cf6d0",
+    "#7fb3ff",
+    "#ffd66b",
+    "#ff8ab5",
+    "#c49cff",
+    "#ff9e66"
+  ][i % 6];
+}
+
+function rand(a,b){
+  return a + Math.random() * (b-a);
+}
+
+function clamp(v,a,b){
+  return Math.max(a, Math.min(b,v));
+}
+
+function dist(a,b){
+  return Math.hypot(a.x-b.x, a.y-b.y);
+}
+
+function circleRect(c,r,o){
+  const x = clamp(c.x,o.x,o.x+o.w);
+  const y = clamp(c.y,o.y,o.y+o.h);
+
+  return Math.hypot(c.x-x,c.y-y) < r;
+}
+
+function moveWithCollisions(p,dx,dy){
+
+  let nx = clamp(p.x + dx,32,W-32);
+  let ny = p.y;
+
+  if(!obstacles.some(o => circleRect({x:nx,y},p.r,o))){
+    p.x = nx;
+  }
+
+  ny = clamp(p.y + dy,32,H-32);
+
+  if(!obstacles.some(o => circleRect({x:p.x,y:ny},p.r,o))){
+    p.y = ny;
+  }
+
+}
+
+function safeRoomCode(){
+  return Math.random().toString(36).slice(2,8).toUpperCase();
+}
+
+let peer = null;
+let host = false;
+let roomCode = "";
+let hostPeerId = "";
+
+let conns = new Map();
+let selfId = "";
+
+let gameState = "menu";
+
+let players = {};
+
+let crystals = [];
+
+let zone = {
+  x: W/2,
+  y: H/2,
+  r: 900,
+  targetX: W/2,
+  targetY: H/2,
+  targetR: 900,
+  start: 0,
+  duration: 45000
+};
+
+let matchStartedAt = 0;
+let lastSnapshot = 0;
+let lastFrame = 0;
+
+let elapsed = 0;
+
+let local = {
+  x: W/2,
+  y: H/2,
+  r: 18,
+  angle: 0,
+  crystals: 0,
+  dash: 0,
+  score: 0,
+  name:
+    "Rider-" +
+    Math.random().toString(36).slice(2,6).toUpperCase(),
+  color:
+    keyColor(Math.floor(Math.random() * 6))
+};
+
+let spawnPoints = [];
+
+for(let i = 0; i < MAX_PLAYERS; i++){
+
+  const a = i / MAX_PLAYERS * Math.PI * 2;
+
+  spawnPoints.push({
+    x: W/2 + Math.cos(a) * 650,
+    y: H/2 + Math.sin(a) * 430
+  });
+
+}
+
+function showScreen(which){
+
+  [menu,lobby,end].forEach(x => {
+    x.classList.remove("active");
+  });
+
+  if(which){
+    which.classList.add("active");
+  }
+
+}
+
+function statusText(t,bad=false){
+
+  menuStatus.textContent = t;
+
+  menuStatus.className =
+    "tiny" +
+    (bad ? " bad" : "");
+
+}
+
+function toastMsg(t){
+
+  toast.textContent = t;
+  toast.classList.add("show");
+
+  clearTimeout(toastMsg.t);
+
+  toastMsg.t = setTimeout(() => {
+    toast.classList.remove("show");
+  },1800);
+
+}
+
+function bigMsg(t){
+
+  message.textContent = t;
+  message.classList.add("show");
+
+  clearTimeout(bigMsg.t);
+
+  bigMsg.t = setTimeout(() => {
+    message.classList.remove("show");
+  },1700);
+
+}
+
+function resetWorld(){
+
+  crystals = [];
+
+  for(let i = 0; i < 46; i++){
+    spawnCrystal();
+  }
+
+  zone = {
+    x: W/2,
+    y: H/2,
+    r: 900,
+    targetX: W/2,
+    targetY: H/2,
+    targetR: 900,
+    start: performance.now(),
+    duration: 45000
+  };
+
+  matchStartedAt = performance.now();
+
+}
+
+function spawnCrystal(){
+
+  for(let tries=0; tries<80; tries++){
+
+    const c = {
+      x: rand(100,W-100),
+      y: rand(100,H-100),
+      r: 9,
+      id:
+        crypto.randomUUID?.() ||
+        Math.random().toString(36).slice(2)
+    };
+
+    if(
+      !obstacles.some(o => circleRect(c,20,o)) &&
+      Math.hypot(c.x-W/2,c.y-H/2) < 860
+    ){
+      crystals.push(c);
+      return;
+    }
+
+  }
+
+}
+
+function createPeer(id,onReady){
+
+  if(peer){
+    try{
+      peer.destroy();
+    }catch{}
+
+    peer = null;
+  }
+
+  peer = new Peer(
+    id || undefined,
+    {
+      debug:0
+    }
+  );
+
+  peer.on("open",id2 => {
+
+    selfId = id2;
+
+    onReady(id2);
+
+  });
+
+  peer.on("error",err => {
+
+    console.error(err);
+
+    if(err.type === "unavailable-id"){
+
+      statusText(
+        "Dieser Raum existiert schon. Bitte einen anderen Code nehmen.",
+        true
+      );
+
+    }else{
+
+      statusText(
+        "PeerJS-Fehler: " +
+        (err.type || "Verbindung fehlgeschlagen"),
+        true
+      );
+
+    }
+
+  });
+
+  peer.on("disconnected",() => {
+    toastMsg("Verbindung zum Signaling verloren.");
+  });
+
+  peer.on("close",() => {
+    toastMsg("Peer geschlossen.");
+  });
+
+  peer.on("connection",c => {
+    handleIncoming(c);
+  });
+
+}
+
+function setupPlayer(id,name,color,slot){
+
+  return {
+    id,
+    name,
+    color,
+    x: spawnPoints[slot % spawnPoints.length].x,
+    y: spawnPoints[slot % spawnPoints.length].y,
+    angle:0,
+    crystals:0,
+    score:0,
+    r:18,
+    ready:false,
+    connected:true,
+    slot
+  };
+
+}
+
+function hostAddConnection(c){
+
+  if(conns.size >= MAX_PLAYERS-1){
+    c.close();
+    return;
+  }
+
+  conns.set(c.peer,c);
+
+  c.on("open",() => {});
+
+  c.on("data",msg => {
+    handleHostData(c,msg);
+  });
+
+  c.on("close",() => {
+
+    conns.delete(c.peer);
+    delete players[c.peer];
+
+    broadcast({
+      type:"ROSTER",
+      players:safePlayers()
+    });
+
+  });
+
+  c.on("error",() => {
+
+    conns.delete(c.peer);
+    delete players[c.peer];
+
+  });
+
+}
+
+function handleIncoming(c){
+
+  if(host){
+
+    hostAddConnection(c);
+
+  }else{
+
+    conns.set(c.peer,c);
+
+    c.on("data",handleClientData);
+
+    c.on("close",() => {
+      toastMsg("Host-Verbindung geschlossen.");
+      endClient();
+    });
+
+    c.on("error",() => {
+      endClient();
+    });
+
+  }
+
+}
+
+function send(c,msg){
+
+  try{
+
+    if(c?.open){
+      c.send(msg);
+    }
+
+  }catch{}
+
+}
+
+function broadcast(msg,except){
+
+  for(const [id,c] of conns){
+
+    if(id !== except){
+      send(c,msg);
+    }
+
+  }
+
+}
+
+function safePlayers(){
+
+  return Object.fromEntries(
+    Object.entries(players).map(
+      ([id,p]) => [
+        id,
+        {
+          id:p.id,
+          name:p.name,
+          color:p.color,
+          x:p.x,
+          y:p.y,
+          angle:p.angle,
+          crystals:p.crystals,
+          score:p.score,
+          r:p.r,
+          slot:p.slot
+        }
+      ]
+    )
+  );
+
+}
+
+function handleHostData(c,msg){
+
+  if(!msg || typeof msg !== "object"){
+    return;
+  }
+
+  if(msg.type === "HELLO"){
+
+    if(!players[c.peer]){
+
+      const slot = Object.keys(players).length;
+
+      players[c.peer] =
+        setupPlayer(
+          c.peer,
+          String(msg.name || "Rider").slice(0,16),
+          msg.color || keyColor(slot),
+          slot
+        );
+
+    }
+
+    send(c,{
+      type:"INIT",
+      host:true,
+      room:roomCode,
+      players:safePlayers(),
+      crystals,
+      zone,
+      started:gameState === "game"
+    });
+
+    broadcast({
+      type:"ROSTER",
+      players:safePlayers()
+    },c.peer);
+
+    renderLobby();
+
+  }
+
+  else if(msg.type === "INPUT" && players[c.peer]){
+
+    const p = players[c.peer];
+
+    const nx = Number(msg.x);
+    const ny = Number(msg.y);
+    const a = Number(msg.angle);
+
+    if(Number.isFinite(nx) && Number.isFinite(ny)){
+
+      p.x = clamp(nx,32,W-32);
+      p.y = clamp(ny,32,H-32);
+
+    }
+
+    if(Number.isFinite(a)){
+      p.angle = a;
+    }
+
+  }
+
+  else if(msg.type === "START" && c.peer === hostPeerId){
+
+    startMatch();
+
+  }
+
+}
+
+function handleClientData(msg){
+
+  if(!msg || typeof msg !== "object"){
+    return;
+  }
+
+  if(msg.type === "INIT"){
+
+    players = msg.players || {};
+    crystals = msg.crystals || [];
+    zone = msg.zone || zone;
+
+    gameState =
+      msg.started
+      ? "game"
+      : "lobby";
+
+    roomCode = msg.room || roomCode;
+
+    showScreen(
+      gameState === "game"
+      ? null
+      : lobby
+    );
+
+    if(gameState === "game"){
+      enterGameUi();
+    }else{
+      renderLobby();
+    }
+
+  }
+
+  else if(msg.type === "ROSTER"){
+
+    players = msg.players || {};
+
+    renderLobby();
+
+  }
+
+  else if(msg.type === "SNAP"){
+
+    players = msg.players || players;
+    crystals = msg.crystals || crystals;
+    zone = msg.zone || zone;
+
+    matchStartedAt =
+      msg.matchStartedAt ||
+      matchStartedAt;
+
+  }
+
+  else if(msg.type === "STARTED"){
+
+    players = msg.players || players;
+    crystals = msg.crystals || crystals;
+    zone = msg.zone || zone;
+
+    matchStartedAt =
+      msg.matchStartedAt ||
+      performance.now();
+
+    gameState = "game";
+
+    enterGameUi();
+
+  }
+
+  else if(msg.type === "END"){
+
+    finishScreen(
+      msg.title || "Match beendet",
+      msg.text || ""
+    );
+
+  }
+
+}
+
+document.getElementById("createBtn").onclick = () => {
+
+  roomCode = safeRoomCode();
+
+  host = true;
+
+  hostPeerId =
+    "skyrush-" +
+    roomCode.toLowerCase();
+
+  statusText("Verbinde mit PeerJS …");
+
+  createPeer(hostPeerId,() => {
+
+    players = {};
+
+    players[selfId] =
+      setupPlayer(
+        selfId,
+        local.name,
+        local.color,
+        0
+      );
+
+    gameState = "lobby";
+
+    roomCodeView.textContent = roomCode;
+
+    showScreen(lobby);
+
+    renderLobby();
+
+    lobbyStatus.textContent =
+      "Du bist der Host. Warte auf Mitspieler.";
+
+    toastMsg("Raum erstellt: " + roomCode);
+
+  });
+
+};
+
+document.getElementById("joinBtn").onclick = () => {
+
+  const code =
+    roomInput.value
+      .trim()
+      .toUpperCase();
+
+  if(!/^[A-Z0-9]{4,6}$/.test(code)){
+
+    statusText(
+      "Bitte einen gültigen 4–6 Zeichen langen Code eingeben.",
+      true
+    );
+
+    return;
+  }
+
+  roomCode = code;
+  host = false;
+
+  hostPeerId =
+    "skyrush-" +
+    roomCode.toLowerCase();
+
+  statusText(
+    "Verbinde mit Raum " +
+    roomCode +
+    " …"
+  );
+
+  createPeer(null,() => {
+
+    const c =
+      peer.connect(
+        hostPeerId,
+        {
+          reliable:true
+        }
+      );
+
+    conns.set(
+      hostPeerId,
+      c
+    );
+
+    c.on("open",() => {
+
+      send(c,{
+        type:"HELLO",
+        name:local.name,
+        color:local.color
+      });
+
+      showScreen(lobby);
+
+      roomCodeView.textContent =
+        roomCode;
+
+      lobbyStatus.textContent =
+        "Mit Host verbunden.";
+
+    });
+
+    c.on("data",handleClientData);
+
+    c.on("close",() => {
+      endClient();
+    });
+
+    c.on("error",() => {
+      endClient();
+    });
+
+  });
+
+};
+
+document.getElementById("startBtn").onclick = () => {
+
+  if(!host){
+
+    lobbyStatus.textContent =
+      "Nur der Host kann starten.";
+
+    return;
+  }
+
+  startMatch();
+
+};
+
+document.getElementById("leaveBtn").onclick = () => {
+  location.reload();
+};
+
+document.getElementById("againBtn").onclick = () => {
+  location.reload();
+};
+
+function renderLobby(){
+
+  roomCodeView.textContent =
+    roomCode || "------";
+
+  const arr =
+    Object.values(players);
+
+  lobbyList.innerHTML =
+    arr.length
+    ? arr.map((p,i) =>
+      `<div class="playerLine">
+        <span>● ${escapeHtml(p.name)}</span>
+        <span>${i === 0 ? "HOST" : "Spieler"}</span>
+      </div>`
+    ).join("")
+    : "Noch keine Spieler.";
+
+  document.getElementById("startBtn").disabled = !host;
+
+}
+
+function escapeHtml(s){
+
+  return String(s).replace(
+    /[&<>"']/g,
+    c =>
+      ({
+        "&":"&amp;",
+        "<":"&lt;",
+        ">":"&gt;",
+        '"':"&quot;",
+        "'":"&#039;"
+      }[c])
+  );
+
+}
+
+function startMatch(){
+
+  if(!host || Object.keys(players).length < 1){
+    return;
+  }
+
+  resetWorld();
+
+  gameState = "game";
+
+  matchStartedAt =
+    performance.now();
+
+  players[selfId].x =
+    spawnPoints[0].x;
+
+  players[selfId].y =
+    spawnPoints[0].y;
+
+  const packet = {
+    type:"STARTED",
+    players:safePlayers(),
+    crystals,
+    zone,
+    matchStartedAt
+  };
+
+  broadcast(packet);
+
+  enterGameUi();
+
+}
+
+function enterGameUi(){
+
+  showScreen(null);
+
+  hud.style.display = "block";
+  help.style.display = "block";
+  mini.style.display = "block";
+
+  canvas.style.cursor = "crosshair";
+
+  gameState = "game";
+
+  bigMsg("LOS!");
+
+  updateHud();
+
+}
+
+function endClient(){
+
+  if(gameState === "game"){
+
+    finishScreen(
+      "Verbindung beendet",
+      "Die Verbindung zum Host ist abgebrochen."
+    );
+
+  }else{
+
+    lobbyStatus.textContent =
+      "Die Verbindung zum Host wurde getrennt.";
+
+  }
+
+}
+
+function finishScreen(title,text){
+
+  gameState = "end";
+
+  hud.style.display = "none";
+  help.style.display = "none";
+  mini.style.display = "none";
+
+  document.getElementById("endTitle").textContent =
+    title;
+
+  document.getElementById("endText").textContent =
+    text;
+
+  showScreen(end);
+
+}
+
+function tryDash(){
+
+  if(gameState !== "game" || local.dash > 0){
+    return;
+  }
+
+  local.dash = 900;
+
+  local.x =
+    clamp(
+      local.x +
+      Math.cos(local.angle) * 120,
+      32,
+      W-32
+    );
+
+  local.y =
+    clamp(
+      local.y +
+      Math.sin(local.angle) * 120,
+      32,
+      H-32
+    );
+
+}
+
+function updateLocal(dt){
+
+  const speed =
+    keys.has("ShiftLeft") ||
+    keys.has("ShiftRight")
+    ? 360
+    : 240;
+
+  let vx =
+    (keys.has("KeyD") ? 1 : 0) -
+    (keys.has("KeyA") ? 1 : 0);
+
+  let vy =
+    (keys.has("KeyS") ? 1 : 0) -
+    (keys.has("KeyW") ? 1 : 0);
+
+  if(vx || vy){
+
+    const l =
+      Math.hypot(vx,vy);
+
+    vx /= l;
+    vy /= l;
+
+    moveWithCollisions(
+      local,
+      vx * speed * dt,
+      vy * speed * dt
+    );
+
+  }
+
+  const cx =
+    canvas.width / DPR / 2;
+
+  const cy =
+    canvas.height / DPR / 2;
+
+  local.angle =
+    Math.atan2(
+      mouse.y - cy,
+      mouse.x - cx
+    );
+
+  local.dash =
+    Math.max(
+      0,
+      local.dash - dt * 1000
+    );
+
+  for(let i = crystals.length - 1; i >= 0; i--){
+
+    const c =
+      crystals[i];
+
+    if(
+      Math.hypot(
+        local.x-c.x,
+        local.y-c.y
+      ) <
+      local.r + c.r + 5
+    ){
+
+      crystals.splice(i,1);
+
+      local.crystals++;
+      local.score += 10;
+
+      bigMsg("+1 KRISTALL");
+
+      if(host){
+        awardLocalOnHost();
+      }
+
+      break;
+    }
+
+  }
+
+  if(host){
+
+    const me =
+      players[selfId];
+
+    if(me){
+
+      me.x = local.x;
+      me.y = local.y;
+      me.angle = local.angle;
+      me.crystals = local.crystals;
+      me.score = local.score;
+
+    }
+
+  }else{
+
+    send(
+      conns.get(hostPeerId),
+      {
+        type:"INPUT",
+        x:local.x,
+        y:local.y,
+        angle:local.angle,
+        crystals:local.crystals,
+        score:local.score
+      }
+    );
+
+  }
+
+}
+
+function awardLocalOnHost(){
+
+  players[selfId].crystals =
+    local.crystals;
+
+  players[selfId].score =
+    local.score;
+
+  while(crystals.length < 38){
+    spawnCrystal();
+  }
+
+}
+
+function updateZone(now){
+
+  const elapsedMatch =
+    now - matchStartedAt;
+
+  const phase =
+    clamp(
+      elapsedMatch /
+      MATCH_TIME,
+      0,
+      1
+    );
+
+  const nextR =
+    Math.max(
+      170,
+      900 - phase * 730
+    );
+
+  if(
+    Math.abs(nextR-zone.targetR) > 40 ||
+    zone.start === 0
+  ){
+
+    zone.start = now;
+    zone.duration = 25000;
+
+    zone.targetR = nextR;
+
+    zone.targetX =
+      clamp(
+        W/2 +
+        Math.sin(elapsedMatch/17000)*320,
+        520,
+        W-520
+      );
+
+    zone.targetY =
+      clamp(
+        H/2 +
+        Math.cos(elapsedMatch/21000)*220,
+        420,
+        H-420
+      );
+
+  }
+
+  const t =
+    clamp(
+      (now-zone.start) /
+      zone.duration,
+      0,
+      1
+    );
+
+  zone.r +=
+    (zone.targetR-zone.r) *
+    Math.min(1,t*.03);
+
+  zone.x +=
+    (zone.targetX-zone.x) *
+    Math.min(1,t*.03);
+
+  zone.y +=
+    (zone.targetY-zone.y) *
+    Math.min(1,t*.03);
+
+  if(
+    Math.hypot(
+      local.x-zone.x,
+      local.y-zone.y
+    ) > zone.r
+  ){
+
+    local.score =
+      Math.max(
+        0,
+        local.score -
+        dtFrames() * .45
+      );
+
+  }
+
+}
+
+function dtFrames(){
+  return 1/60;
+}
+
+function hostGameTick(now){
+
+  if(gameState !== "game"){
+    return;
+  }
+
+  updateZone(now);
+
+  if(
+    Math.hypot(
+      local.x-zone.x,
+      local.y-zone.y
+    ) > zone.r
+  ){
+
+    const dx =
+      zone.x-local.x;
+
+    const dy =
+      zone.y-local.y;
+
+    const d =
+      Math.hypot(dx,dy) || 1;
+
+    moveWithCollisions(
+      local,
+      dx/d * 55 * (TICK/1000),
+      dy/d * 55 * (TICK/1000)
+    );
+
+    players[selfId].x = local.x;
+    players[selfId].y = local.y;
+
+  }
+
+  for(
+    const [id,p]
+    of Object.entries(players)
+  ){
+
+    if(id === selfId){
+      continue;
+    }
+
+    const outside =
+      Math.hypot(
+        p.x-zone.x,
+        p.y-zone.y
+      ) > zone.r;
+
+    if(outside){
+
+      p.score =
+        Math.max(
+          0,
+          p.score - .12
+        );
+
+    }
+
+    p.x =
+      clamp(
+        p.x,
+        32,
+        W-32
+      );
+
+    p.y =
+      clamp(
+        p.y,
+        32,
+        H-32
+      );
+
+  }
+
+  while(crystals.length < 34){
+    spawnCrystal();
+  }
+
+  const rankSorted =
+    Object.values(players)
+      .sort(
+        (a,b) =>
+          b.crystals-a.crystals ||
+          b.score-a.score
+      );
+
+  if(
+    performance.now() -
+    matchStartedAt >
+    MATCH_TIME
+  ){
+
+    const winner =
+      rankSorted[0];
+
+    finishHost(winner);
+
+    return;
+  }
+
+  if(
+    now-lastSnapshot >
+    SNAP
+  ){
+
+    broadcast({
+      type:"SNAP",
+      players:safePlayers(),
+      crystals,
+      zone,
+      matchStartedAt
+    });
+
+    lastSnapshot = now;
+
+  }
+
+}
+
+function finishHost(winner){
+
+  gameState = "end";
+
+  const txt =
+    `${winner.name} gewinnt mit ${winner.crystals} Kristallen.`;
+
+  broadcast({
+    type:"END",
+    title:"🏆 " + winner.name,
+    text:txt
+  });
+
+  finishScreen(
+    "🏆 " + winner.name,
+    txt
+  );
+
+}
+
+function updateRemoteFromPlayers(){
+
+  const me =
+    players[selfId];
+
+  if(me && !host){
+
+    local.crystals =
+      me.crystals ||
+      local.crystals;
+
+    local.score =
+      me.score ||
+      local.score;
+
+  }
+
+}
+
+function updateHud(){
+
+  document.getElementById("crystals").textContent =
+    local.crystals;
+
+  document.getElementById("miniCrystals").textContent =
+    local.crystals;
+
+  const rank =
+    Object.values(players)
+      .sort(
+        (a,b) =>
+          b.crystals-a.crystals ||
+          b.score-a.score
+      );
+
+  document.getElementById("rank").textContent =
+    rank.findIndex(
+      p => p.id === selfId
+    ) + 1 || "—";
+
+  document.getElementById("players").textContent =
+    Object.keys(players).length;
+
+  document.getElementById("dash").textContent =
+    local.dash <= 0
+    ? "READY"
+    : (local.dash/1000).toFixed(1) + "s";
+
+  const outside =
+    Math.hypot(
+      local.x-zone.x,
+      local.y-zone.y
+    ) > zone.r;
+
+  document.getElementById("zoneText").textContent =
+    outside
+    ? "Zur Zone!"
+    : "Sichere Zone";
+
+  document.getElementById("zoneBar").style.width =
+    clamp(
+      zone.r/900*100,
+      0,
+      100
+    ) + "%";
+
+}
+
+function camera(){
+
+  return {
+    x:clamp(
+      local.x - innerWidth/2,
+      0,
+      Math.max(0,W-innerWidth)
+    ),
+
+    y:clamp(
+      local.y - innerHeight/2,
+      0,
+      Math.max(0,H-innerHeight)
+    )
+  };
+
+}
+
+function draw(now){
+
+  const dpr = DPR;
+
+  ctx.setTransform(
+    dpr,0,0,dpr,0,0
+  );
+
+  ctx.clearRect(
+    0,
+    0,
+    innerWidth,
+    innerHeight
+  );
+
+  const cam =
+    camera();
+
+  ctx.fillStyle =
+    "#0a1524";
+
+  ctx.fillRect(
+    0,
+    0,
+    innerWidth,
+    innerHeight
+  );
+
+  ctx.save();
+
+  ctx.translate(
+    -cam.x,
+    -cam.y
+  );
+
+  ctx.fillStyle =
+    "#10233a";
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  ctx.strokeStyle =
+    "rgba(255,255,255,.035)";
+
+  ctx.lineWidth = 1;
+
+  for(let x=0;x<=W;x+=80){
+
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,H);
+    ctx.stroke();
+
+  }
+
+  for(let y=0;y<=H;y+=80){
+
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(W,y);
+    ctx.stroke();
+
+  }
+
+  for(const s of stars){
+
+    ctx.globalAlpha =
+      s.a;
+
+    ctx.fillStyle =
+      "#b9d5ef";
+
+    ctx.beginPath();
+
+    ctx.arc(
+      s.x,
+      s.y,
+      s.r,
+      0,
+      Math.PI*2
+    );
+
+    ctx.fill();
+
+  }
+
+  ctx.globalAlpha = 1;
+
+  // Zone
+  ctx.save();
+
+  ctx.fillStyle =
+    "rgba(80,120,180,.18)";
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  ctx.globalCompositeOperation =
+    "destination-out";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    zone.x,
+    zone.y,
+    zone.r,
+    0,
+    Math.PI*2
+  );
+
+  ctx.fill();
+
+  ctx.restore();
+
+  ctx.strokeStyle =
+    "rgba(124,246,208,.75)";
+
+  ctx.lineWidth = 6;
+
+  ctx.beginPath();
+
+  ctx.arc(
+    zone.x,
+    zone.y,
+    zone.r,
+    0,
+    Math.PI*2
+  );
+
+  ctx.stroke();
+
+  // Gebäude
+  for(const o of obstacles){
+
+    ctx.fillStyle =
+      "#1b3047";
+
+    ctx.fillRect(
+      o.x,
+      o.y,
+      o.w,
+      o.h
+    );
+
+    ctx.fillStyle =
+      "#28435d";
+
+    ctx.fillRect(
+      o.x+8,
+      o.y+8,
+      o.w-16,
+      18
+    );
+
+    ctx.strokeStyle =
+      "rgba(255,255,255,.08)";
+
+    ctx.strokeRect(
+      o.x+.5,
+      o.y+.5,
+      o.w-1,
+      o.h-1
+    );
+
+    for(
+      let xx=o.x+30;
+      xx<o.x+o.w-20;
+      xx+=55
+    ){
+
+      ctx.fillStyle =
+        "rgba(124,180,255,.14)";
+
+      ctx.fillRect(
+        xx,
+        o.y+48,
+        25,
+        16
+      );
+
+    }
+
+  }
+
+  // Kristalle
+  for(const c of crystals){
+
+    const pulse =
+      1 +
+      Math.sin(
+        now/180+c.x
+      ) * .16;
+
+    ctx.save();
+
+    ctx.translate(
+      c.x,
+      c.y
+    );
+
+    ctx.rotate(
+      now/700
+    );
+
+    ctx.shadowBlur = 18;
+    ctx.shadowColor =
+      "#7cf6d0";
+
+    ctx.fillStyle =
+      "#7cf6d0";
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      0,
+      -10*pulse
+    );
+
+    ctx.lineTo(
+      9,
+      0
+    );
+
+    ctx.lineTo(
+      0,
+      12*pulse
+    );
+
+    ctx.lineTo(
+      -9,
+      0
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+
+    ctx.restore();
+
+  }
+
+  // Andere Spieler
+  for(
+    const p of Object.values(players)
+  ){
+
+    if(p.id === selfId){
+      continue;
+    }
+
+    drawPlayer(
+      p,
+      false
+    );
+
+  }
+
+  // eigener Spieler
+  drawPlayer(
+    {
+      ...local,
+      id:selfId
+    },
+    true
+  );
+
+  ctx.restore();
+
+  const g =
+    ctx.createRadialGradient(
+      innerWidth/2,
+      innerHeight/2,
+      80,
+      innerWidth/2,
+      innerHeight/2,
+      Math.max(
+        innerWidth,
+        innerHeight
+      ) * .7
+    );
+
+  g.addColorStop(
+    0,
+    "rgba(0,0,0,0)"
+  );
+
+  g.addColorStop(
+    1,
+    "rgba(0,0,0,.35)"
+  );
+
+  ctx.fillStyle = g;
+
+  ctx.fillRect(
+    0,
+    0,
+    innerWidth,
+    innerHeight
+  );
+
+}
+
+function drawPlayer(p,isLocal){
+
+  ctx.save();
+
+  ctx.translate(
+    p.x,
+    p.y
+  );
+
+  const c =
+    p.color ||
+    "#7fb3ff";
+
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = c;
+
+  ctx.fillStyle = c;
+
+  ctx.beginPath();
+
+  ctx.arc(
+    0,
+    0,
+    p.r,
+    0,
+    Math.PI*2
+  );
+
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle =
+    "#07111f";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    0,
+    0,
+    6,
+    0,
+    Math.PI*2
+  );
+
+  ctx.fill();
+
+  ctx.rotate(
+    p.angle || 0
+  );
+
+  ctx.fillStyle =
+    "rgba(255,255,255,.8)";
+
+  ctx.fillRect(
+    5,
+    -3,
+    16,
+    6
+  );
+
+  ctx.restore();
+
+  ctx.fillStyle =
+    "rgba(255,255,255,.92)";
+
+  ctx.font =
+    "700 12px system-ui";
+
+  ctx.textAlign =
+    "center";
+
+  ctx.fillText(
+    p.name || "Rider",
+    p.x,
+    p.y-p.r-9
+  );
+
+  const w = 38;
+
+  const frac =
+    clamp(
+      (p.crystals || 0) /
+      CRYSTAL_TARGET,
+      0,
+      1
+    );
+
+  ctx.fillStyle =
+    "rgba(255,255,255,.12)";
+
+  ctx.fillRect(
+    p.x-w/2,
+    p.y+p.r+7,
+    w,
+    4
+  );
+
+  ctx.fillStyle = c;
+
+  ctx.fillRect(
+    p.x-w/2,
+    p.y+p.r+7,
+    w*frac,
+    4
+  );
+
+}
+
+function gameLoop(now){
+
+  const dt =
+    Math.min(
+      .05,
+      (now-lastFrame)/1000 || 0
+    );
+
+  lastFrame = now;
+  elapsed += dt;
+
+  if(gameState === "game"){
+
+    updateLocal(dt);
+
+    if(host){
+      hostGameTick(now);
+    }else{
+      updateRemoteFromPlayers();
+    }
+
+    updateHud();
+
+  }
+
+  draw(now);
+
+  requestAnimationFrame(gameLoop);
+
+}
+
+requestAnimationFrame(gameLoop);
+
+setInterval(() => {
+
+  if(
+    gameState === "game" &&
+    host &&
+    players[selfId]
+  ){
+
+    players[selfId].x = local.x;
+    players[selfId].y = local.y;
+    players[selfId].angle = local.angle;
+    players[selfId].crystals = local.crystals;
+    players[selfId].score = local.score;
+
+  }
+
+},120);
+
+roomInput.addEventListener(
+  "input",
+  e => {
+    e.target.value =
+      e.target.value
+        .toUpperCase()
+        .replace(
+          /[^A-Z0-9]/g,
+          ""
+        );
+  }
+);
+
+renderLobby();
+
+</script>
+
+</body>
+</html>
