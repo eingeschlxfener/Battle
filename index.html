@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Serverless Battle Royale - 3D Lobby</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #87CEEB; }
+        
+        /* 3D Canvas im Hintergrund */
+        canvas { position: absolute; top: 0; left: 0; z-index: 1; }
+
+        /* UI-Ebene klick-durchlässig machen */
+        #ui-layer { position: absolute; width: 100%; height: 100%; display: flex; justify-content: flex-start; align-items: center; padding-left: 50px; z-index: 20; pointer-events: none; box-sizing: border-box; }
+        
+        /* Nur die Box ist bedienbar */
+        .lobby-box { background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(5px); padding: 20px; border-radius: 12px; text-align: center; max-width: 340px; width: 100%; pointer-events: auto; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0px 15px 35px rgba(0,0,0,0.6); color: white; }
+        
+        input, select, button { padding: 10px; margin: 6px 0; font-size: 15px; border-radius: 6px; border: none; width: 100%; box-sizing: border-box; }
+        input[type="color"] { padding: 0; height: 40px; cursor: pointer; }
+        button { background: #4488ff; color: white; cursor: pointer; font-weight: bold; }
+        button:hover { background: #3366cc; }
+        
+        #game-ui { position: absolute; top: 15px; left: 15px; color: white; font-weight: bold; display: none; z-index: 10; text-shadow: 2px 2px 0px black; font-size: 22px; pointer-events: none; }
+        
+        #player-list { list-style: none; padding: 0; font-size: 16px; margin: 10px 0; text-align: left; }
+        #player-list li { padding: 8px; background: rgba(255,255,255,0.15); margin-bottom: 5px; border-radius: 5px; display: flex; align-items: center; gap: 10px; }
+        .color-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; display: inline-block; flex-shrink: 0; }
+        
+        h1, h3 { margin-top: 0; }
+    </style>
+</head>
+<body>
+    <div id="game-ui"></div>
+    
+    <div id="ui-layer">
+        <!-- Hauptmenü -->
+        <div id="menu" class="lobby-box">
+            <h3>Dein Charakter</h3>
+            <input type="text" id="player-name" placeholder="Dein Name" maxlength="15" value="Steve">
+            
+            <div style="display: flex; align-items: center; gap: 10px; margin: 5px 0;">
+                <label style="font-size: 14px;">Shirt-Farbe:</label>
+                <input type="color" id="player-color" value="#00aaee">
+            </div>
+            
+            <hr style="border-color: rgba(255,255,255,0.2); margin: 15px 0;">
+            
+            <button onclick="hostGame()">Lobby erstellen (Host)</button>
+            <p style="margin: 10px 0 5px 0; font-size: 13px; color: #ccc;">Oder Einladungs-Link einfügen:</p>
+            <input type="text" id="join-id" placeholder="Game-ID oder Link">
+            <button onclick="joinGame()" style="background: #ff8800;">Beitreten</button>
+            <p id="menu-status" style="color: #ffaaaa; margin: 8px 0 0 0; font-size: 14px;"></p>
+        </div>
+
+        <!-- Lobby Übersicht -->
+        <div id="lobby" class="lobby-box" style="display: none;">
+            <h3>Lobby</h3>
+            
+            <div id="host-controls" style="display: none;">
+                <p style="font-size: 13px; margin-bottom: 5px; text-align: left;">Einladungs-Link:</p>
+                <div style="display: flex; gap: 5px;">
+                    <input type="text" id="display-id" readonly style="background: #222; color: #00ff00; font-size: 12px; text-align: center;">
+                    <button onclick="copyInviteCode()" style="background: #ffaa00; width: auto; padding: 0 12px;">Kopieren</button>
+                </div>
+            </div>
+
+            <ul id="player-list"></ul>
+
+            <p id="lobby-status" style="font-size: 14px; font-weight: bold; margin: 15px 0;">Warte auf Verbindung...</p>
+            <button id="start-btn" onclick="sendStartGame()" style="display: none; background: #55aa55; font-size: 18px;">Spiel starten</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    
+    <script>
+        let peer, conn, isHost = false;
+        let gameState = 'menu';
+        
+        let myData = { name: "Steve", color: "#00aaee" };
+        let peerData = { name: "Wartet...", color: "#ff4444" };
+
+        const uiLayer = document.getElementById('ui-layer');
+        const menuDiv = document.getElementById('menu');
+        const lobbyDiv = document.getElementById('lobby');
+        const playerList = document.getElementById('player-list');
+        const lobbyStatus = document.getElementById('lobby-status');
+        const startBtn = document.getElementById('start-btn');
+        const displayId = document.getElementById('display-id');
+        const gameUi = document.getElementById('game-ui');
+
+        window.onload = () => {
+            init3DEnvironment();
+            const urlParams = new URLSearchParams(window.location.search);
+            const joinId = urlParams.get('join');
+            if (joinId) document.getElementById('join-id').value = joinId;
+        };
+
+        // Live-Farbe & Name ändern
+        document.getElementById('player-color').addEventListener('input', (e) => {
+            myData.color = e.target.value;
+            if (myPlayer) updateShirtColor(myPlayer, myData.color);
+            if (conn && conn.open) conn.send({ type: 'profile', profile: myData });
+        });
+
+        document.getElementById('player-name').addEventListener('input', (e) => {
+            myData.name = e.target.value || "Steve";
+            if (conn && conn.open) conn.send({ type: 'profile', profile: myData });
+        });
+
+        function updateLobbyUI() {
+            let html = `<li><span class="color-dot" style="background: ${myData.color};"></span> ${myData.name} (Du)</li>`;
+            if (conn && conn.open) {
+                html += `<li><span class="color-dot" style="background: ${peerData.color};"></span> ${peerData.name}</li>`;
+            }
+            playerList.innerHTML = html;
+        }
+
+        function copyInviteCode() {
+            displayId.select();
+            if (navigator.clipboard) navigator.clipboard.writeText(displayId.value);
+            alert("Link kopiert!");
+        }
+
+        function hostGame() {
+            document.getElementById('menu-status').innerText = "Erstelle Lobby...";
+            isHost = true;
+            gameState = 'lobby';
+            
+            // In der Lobby stehen beide Figuren nebeneinander vor der Kamera
+            if (myPlayer) {
+                myPlayer.position.set(-1, 0, 0);
+                myPlayer.rotation.y = 0.4;
+            }
+
+            peer = new Peer(); 
+            peer.on('open', (id) => {
+                menuDiv.style.display = 'none';
+                lobbyDiv.style.display = 'block';
+                document.getElementById('host-controls').style.display = 'block';
+                displayId.value = window.location.origin + window.location.pathname + '?join=' + id;
+                updateLobbyUI();
+                lobbyStatus.innerText = "Warte auf Mitspieler...";
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                setupConnection();
+            });
+        }
+
+        function joinGame() {
+            let hostId = document.getElementById('join-id').value.trim();
+            if (!hostId) return document.getElementById('menu-status').innerText = "Bitte ID eingeben!";
+            if (hostId.includes('?join=')) hostId = hostId.split('?join=')[1];
+
+            document.getElementById('menu-status').innerText = "Verbinde...";
+            isHost = false;
+            gameState = 'lobby';
+            
+            if (myPlayer) {
+                myPlayer.position.set(1, 0, 0);
+                myPlayer.rotation.y = -0.4;
+            }
+
+            peer = new Peer();
+            peer.on('open', () => {
+                conn = peer.connect(hostId);
+                setupConnection();
+            });
+        }
+
+        function setupConnection() {
+            conn.on('open', () => {
+                conn.send({ type: 'profile', profile: myData });
+                
+                if (!isHost) {
+                    menuDiv.style.display = 'none';
+                    lobbyDiv.style.display = 'block';
+                    lobbyStatus.innerText = "Verbunden! Warte auf Start...";
+                    updateLobbyUI();
+                }
+            });
+
+            conn.on('data', (data) => {
+                if (data.type === 'profile') {
+                    peerData = data.profile;
+                    updateLobbyUI();
+                    
+                    if (!otherPlayer) {
+                        otherPlayer = createMinecraftCharacter(peerData.color);
+                        // Der andere Spieler steht direkt daneben
+                        otherPlayer.position.set(isHost ? 1 : -1, 0, 0);
+                        otherPlayer.rotation.y = isHost ? -0.4 : 0.4;
+                        scene.add(otherPlayer);
+                    } else {
+                        updateShirtColor(otherPlayer, peerData.color);
+                    }
+                    
+                    if (isHost) {
+                        lobbyStatus.innerText = "Alle bereit!";
+                        startBtn.style.display = 'block';
+                        conn.send({ type: 'profile', profile: myData });
+                    }
+                } else if (data.type === 'start') {
+                    startBattle();
+                } else if (data.type === 'pos' && otherPlayer && gameState === 'game') {
+                    otherPlayer.position.x = data.x;
+                    otherPlayer.position.z = data.z;
+                    otherPlayer.rotation.y = data.rot;
+                    animateLimbs(otherPlayer, data.isMoving, data.time);
+                }
+            });
+        }
+
+        function sendStartGame() {
+            conn.send({ type: 'start' });
+            startBattle();
+        }
+
+        // --- 3D ENGINE ---
+        let scene, camera, renderer, myPlayer, otherPlayer;
+        let clock = new THREE.Clock();
+        const move = { w: false, a: false, s: false, d: false };
+
+        function init3DEnvironment() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            const light = new THREE.DirectionalLight(0xffffff, 1.2);
+            light.position.set(5, 10, 7.5);
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x707070));
+
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshLambertMaterial({ color: 0x55aa55 }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // Startposition im Menü: Zentriert im Hintergrund (während das Menü links darüber schwebt)
+            myPlayer = createMinecraftCharacter(myData.color);
+            myPlayer.position.set(2, 0, -1);
+            myPlayer.rotation.y = -0.5;
+            scene.add(myPlayer);
+
+            document.addEventListener('keydown', e => { if(move.hasOwnProperty(e.key.toLowerCase())) move[e.key.toLowerCase()] = true; });
+            document.addEventListener('keyup', e => { if(move.hasOwnProperty(e.key.toLowerCase())) move[e.key.toLowerCase()] = false; });
+
+            animate();
+        }
+
+        function createMinecraftCharacter(shirtColorHex) {
+            const group = new THREE.Group();
+            const matSkin = new THREE.MeshLambertMaterial({ color: 0xffcc99 });
+            const matShirt = new THREE.MeshLambertMaterial({ color: shirtColorHex });
+            const matPants = new THREE.MeshLambertMaterial({ color: 0x223366 });
+            const matEyes = new THREE.MeshLambertMaterial({ color: 0x000000 });
+
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), matSkin);
+            head.position.y = 2.2; group.add(head);
+
+            const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.1, 0.05), matEyes);
+            eyeL.position.set(-0.2, 2.25, 0.41); group.add(eyeL);
+            const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.1, 0.05), matEyes);
+            eyeR.position.set(0.2, 2.25, 0.41); group.add(eyeR);
+
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.0, 0.4), matShirt);
+            torso.position.y = 1.3; torso.name = "shirt"; group.add(torso);
+
+            const armGeo = new THREE.BoxGeometry(0.3, 1.0, 0.3); armGeo.translate(0, -0.4, 0);
+            const leftArm = new THREE.Mesh(armGeo, matSkin); leftArm.position.set(-0.58, 1.7, 0); group.add(leftArm);
+            const rightArm = new THREE.Mesh(armGeo, matSkin); rightArm.position.set(0.58, 1.7, 0); group.add(rightArm);
+
+            const legGeo = new THREE.BoxGeometry(0.35, 1.0, 0.35); legGeo.translate(0, -0.4, 0);
+            const leftLeg = new THREE.Mesh(legGeo, matPants); leftLeg.position.set(-0.2, 0.8, 0); group.add(leftLeg);
+            const rightLeg = new THREE.Mesh(legGeo, matPants); rightLeg.position.set(0.2, 0.8, 0); group.add(rightLeg);
+
+            group.userData = { leftArm, rightArm, leftLeg, rightLeg };
+            return group;
+        }
+
+        function updateShirtColor(playerGroup, hexColor) {
+            playerGroup.children.forEach(child => {
+                if (child.name === "shirt") child.material.color.set(hexColor);
+            });
+        }
+
+        function animateLimbs(characterGroup, isMoving, time) {
+            const { leftArm, rightArm, leftLeg, rightLeg } = characterGroup.userData;
+            if (!leftArm) return;
+            if (isMoving) {
+                const angle = Math.sin(time * 10) * 0.6;
+                leftArm.rotation.x = angle; rightArm.rotation.x = -angle;
+                leftLeg.rotation.x = -angle; rightLeg.rotation.x = angle;
+            } else {
+                leftArm.rotation.x = 0; rightArm.rotation.x = 0;
+                leftLeg.rotation.x = 0; rightLeg.rotation.x = 0;
+            }
+        }
+
+        function startBattle() {
+            gameState = 'game';
+            uiLayer.style.display = 'none';
+            gameUi.style.display = 'block';
+            gameUi.innerText = `${myData.name} vs ${peerData.name}`;
+
+            myPlayer.position.set(isHost ? -5 : 5, 0, 0);
+            otherPlayer.position.set(isHost ? 5 : -5, 0, 0);
+            myPlayer.rotation.y = isHost ? Math.PI/2 : -Math.PI/2;
+            otherPlayer.rotation.y = isHost ? -Math.PI/2 : Math.PI/2;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const elapsedTime = clock.getElapsedTime();
+
+            if (gameState === 'menu' || gameState === 'lobby') {
+                // Kamera schaut von schräg vorne auf die Figuren im Hintergrund
+                camera.position.set(0, 2.5, 6);
+                camera.lookAt(0, 1.2, 0);
+                
+                // Leichte Idle-Animation (Atmen)
+                if(myPlayer) myPlayer.position.y = Math.sin(elapsedTime * 2) * 0.04;
+                if(otherPlayer) otherPlayer.position.y = Math.sin(elapsedTime * 2 + 1) * 0.04;
+
+            } else if (gameState === 'game') {
+                let isMoving = false;
+                let dirX = 0, dirZ = 0;
+
+                myPlayer.position.y = 0; 
+                if(otherPlayer) otherPlayer.position.y = 0;
+
+                if (move.w) { dirZ -= 1; isMoving = true; }
+                if (move.s) { dirZ += 1; isMoving = true; }
+                if (move.a) { dirX -= 1; isMoving = true; }
+                if (move.d) { dirX += 1; isMoving = true; }
+
+                if (isMoving) {
+                    myPlayer.position.x += dirX * 0.15;
+                    myPlayer.position.z += dirZ * 0.15;
+                    myPlayer.rotation.y = Math.atan2(dirX, dirZ);
+                }
+
+                animateLimbs(myPlayer, isMoving, elapsedTime);
+
+                camera.position.x = myPlayer.position.x;
+                camera.position.z = myPlayer.position.z + 7;
+                camera.position.y = myPlayer.position.y + 5;
+                camera.lookAt(myPlayer.position.x, myPlayer.position.y + 1.5, myPlayer.position.z);
+
+                if (conn && conn.open) {
+                    conn.send({ type: 'pos', x: myPlayer.position.x, z: myPlayer.position.z, rot: myPlayer.rotation.y, isMoving: isMoving, time: elapsedTime });
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
