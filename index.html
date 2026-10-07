@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Serverless Battle Royale</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #87CEEB; }
+        #ui-layer { position: absolute; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); color: white; z-index: 20; }
+        input, button { padding: 10px; margin: 5px; font-size: 16px; }
+        #game-ui { position: absolute; top: 10px; left: 10px; color: white; font-weight: bold; display: none; z-index: 10; }
+    </style>
+</head>
+<body>
+    <div id="game-ui">HP: 100 | Serverless Mode</div>
+    
+    <div id="ui-layer">
+        <h1>Browser Royale</h1>
+        <div id="menu">
+            <button onclick="hostGame()">Spiel erstellen (Host)</button>
+            <br><br>
+            <input type="text" id="join-id" placeholder="Game-ID des Freundes">
+            <button onclick="joinGame()">Spiel beitreten</button>
+        </div>
+        <h2 id="status-text"></h2>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    
+    <script>
+        let peer, conn;
+        const uiLayer = document.getElementById('ui-layer');
+        const statusText = document.getElementById('status-text');
+        const gameUi = document.getElementById('game-ui');
+
+        function hostGame() {
+            statusText.innerText = "Erstelle Spiel...";
+            peer = new Peer();
+            peer.on('open', (id) => {
+                statusText.innerText = `Deine Game-ID lautet:\n${id}\n\nSchicke diese an deinen Freund!`;
+            });
+            peer.on('connection', (connection) => {
+                conn = connection;
+                startGame('host');
+            });
+        }
+
+        function joinGame() {
+            const hostId = document.getElementById('join-id').value;
+            if (!hostId) return alert("Bitte eine ID eingeben!");
+            statusText.innerText = "Verbinde...";
+            peer = new Peer();
+            peer.on('open', () => {
+                conn = peer.connect(hostId);
+                conn.on('open', () => startGame('client'));
+            });
+        }
+
+        let scene, camera, renderer, myPlayer, otherPlayer;
+        const move = { w: false, a: false, s: false, d: false };
+
+        function startGame(role) {
+            uiLayer.style.display = 'none';
+            gameUi.style.display = 'block';
+
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshBasicMaterial({ color: 0x55aa55 }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const geo = new THREE.BoxGeometry(1, 2, 1);
+            myPlayer = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: role === 'host' ? 0x3333aa : 0xaa3333 }));
+            otherPlayer = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: role === 'host' ? 0xaa3333 : 0x3333aa }));
+            
+            myPlayer.position.x = role === 'host' ? -2 : 2;
+            otherPlayer.position.x = role === 'host' ? 2 : -2;
+
+            scene.add(myPlayer);
+            scene.add(otherPlayer);
+
+            document.addEventListener('keydown', e => move[e.key] = true);
+            document.addEventListener('keyup', e => move[e.key] = false);
+
+            conn.on('data', (data) => {
+                otherPlayer.position.x = data.x;
+                otherPlayer.position.z = data.z;
+            });
+
+            animate();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            let moved = false;
+            if (move.w) { myPlayer.position.z -= 0.1; moved = true; }
+            if (move.s) { myPlayer.position.z += 0.1; moved = true; }
+            if (move.a) { myPlayer.position.x -= 0.1; moved = true; }
+            if (move.d) { myPlayer.position.x += 0.1; moved = true; }
+
+            camera.position.x = myPlayer.position.x;
+            camera.position.z = myPlayer.position.z + 5;
+
+            if (moved) {
+                conn.send({ x: myPlayer.position.x, z: myPlayer.position.z });
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
